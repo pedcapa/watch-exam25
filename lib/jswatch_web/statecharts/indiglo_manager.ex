@@ -1,76 +1,61 @@
 defmodule JswatchWeb.IndigloManager do
+  @moduledoc """
+  Gestiona la luz de fondo (Indiglo). Ahora es iniciado por el supervisor
+  y maneja los eventos de forma robusta.
+  """
   use GenServer
 
-  def init(ui) do
-    :gproc.reg({:p, :l, :ui_event})
-    {:ok, %{ui_pid: ui, st: IndigloOff, count: 0, timer1: nil}}
+  # --- API Pública ---
+
+  # CAMBIO: commit -> "Inicia el GenServer con las opciones del supervisor."
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
   end
 
-  def handle_info(:"top-right-pressed", %{ui_pid: pid, st: IndigloOff} = state) do
-    GenServer.cast(pid, :set_indiglo)
-    {:noreply, %{state | st: IndigloOn}}
+  # --- Callbacks del GenServer ---
+
+  # CAMBIO: commit -> "Inicializa el estado sin UI registrada."
+  def init(_opts) do
+    # No se usa gproc aquí, ya que la comunicación es más explícita ahora.
+    {:ok, %{ui_pid: nil, st: :off, turn_off_timer: nil}}
   end
 
-  def handle_info(:"top-right-released", %{st: IndigloOn} = state) do
-    timer = Process.send_after(self(), Waiting_IndigloOff, 2000)
-    {:noreply, %{state | st: Waiting, timer1: timer}}
-  end
-  def handle_info(:"top-left-pressed", state) do
-    :gproc.send({:p, :l, :ui_event}, :update_alarm)
-    {:noreply, state}
+  # --- Manejadores de Cast ---
+
+  # CAMBIO: commit -> "Registra la UI activa para recibir eventos."
+  def handle_cast({:register_ui, ui_pid}, state) do
+    {:noreply, %{state | ui_pid: ui_pid}}
   end
 
-  def handle_info(Waiting_IndigloOff, %{ui_pid: pid, st: Waiting} = state) do
-    GenServer.cast(pid, :unset_indiglo)
-    {:noreply, %{state| st: IndigloOff}}
+  # CAMBIO: commit -> "Maneja el evento de presionar el botón superior derecho."
+  def handle_cast({:button_press, :top_right}, %{ui_pid: ui_pid, st: st} = state) do
+    # Si hay un temporizador para apagar la luz, lo cancelamos.
+    if timer = state.turn_off_timer, do: Process.cancel_timer(timer)
+
+    # Encendemos la luz.
+    if ui_pid, do: GenServer.cast(ui_pid, :set_indiglo)
+
+    # Programamos que la luz se apague sola después de 3 segundos.
+    new_timer = Process.send_after(self(), :turn_off_indiglo, 3000)
+
+    # Actualizamos el estado.
+    {:noreply, %{state | st: :on, turn_off_timer: new_timer}}
   end
 
-  def handle_info(:start_alarm, %{ui_pid: pid, st: IndigloOff} = state) do
-    Process.send_after(self(), AlarmOn_AlarmOff, 500)
-    GenServer.cast(pid, :set_indiglo)
-    {:noreply, %{state | count: 51, st: AlarmOn}}
+  # Manejador para cualquier otro cast (lo ignoramos).
+  def handle_cast(_msg, state), do: {:noreply, state}
+
+
+  # --- Manejadores de Info (Timers) ---
+
+  # CAMBIO: commit -> "Maneja el evento de apagar la luz después del temporizador."
+  def handle_info(:turn_off_indiglo, %{ui_pid: ui_pid} = state) do
+    if ui_pid, do: GenServer.cast(ui_pid, :unset_indiglo)
+    {:noreply, %{state | st: :off, turn_off_timer: nil}}
   end
 
-  def handle_info(:start_alarm, %{st: IndigloOn} = state) do
-    Process.send_after(self(), AlarmOff_AlarmOn, 500)
-    {:noreply, %{state | count: 51, st: AlarmOff}}
-  end
-
-  def handle_info(Waiting_IndigloOff, %{ui_pid: pid, st: Waiting, timer1: timer} = state) do
-    if timer != nil do
-      Process.cancel_timer(timer)
-    end
-    GenServer.cast(pid, :unset_indiglo)
-    Process.send_after(self(), AlarmOff_AlarmOn, 500)
-
-    {:noreply, %{state| count: 51, timer1: nil, st: AlarmOff}}
-  end
-
-
-  def handle_info(AlarmOn_AlarmOff, %{ui_pid: pid, count: count, st: AlarmOn} = state) do
-    if count >= 1 do
-      Process.send_after(self(), AlarmOff_AlarmOn, 500)
-      GenServer.cast(pid, :unset_indiglo)
-      {:noreply, %{state | count: count - 1, st: AlarmOff}}
-    else
-      GenServer.cast(pid, :unset_indiglo)
-      {:noreply, %{state | count: 0, st: IndigloOff}}
-    end
-
-  end
-  def handle_info(AlarmOff_AlarmOn, %{ui_pid: pid, count: count, st: AlarmOff} = state) do
-    if count >= 1 do
-      Process.send_after(self(), AlarmOn_AlarmOff, 500)
-      GenServer.cast(pid, :set_indiglo)
-      {:noreply, %{state | count: count - 1, st: AlarmOn}}
-    else
-      GenServer.cast(pid, :unset_indiglo)
-      {:noreply, %{state | count: 0, st: IndigloOff}}
-    end
-  end
-
-  def handle_info(event, state) do
-    IO.inspect(event)
+  # Manejador para cualquier otra info (la ignoramos).
+  def handle_info(_event, state) do
     {:noreply, state}
   end
 end

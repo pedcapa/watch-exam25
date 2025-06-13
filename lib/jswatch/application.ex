@@ -5,6 +5,8 @@ defmodule Jswatch.Application do
 
   use Application
 
+  alias JswatchWeb.{ClockManager, IndigloManager, StopwatchManager}
+
   @impl true
   def start(_type, _args) do
     children = [
@@ -15,9 +17,14 @@ defmodule Jswatch.Application do
       # Start Finch
       {Finch, name: Jswatch.Finch},
       # Start the Endpoint (http/https)
-      JswatchWeb.Endpoint
-      # Start a worker by calling: Jswatch.Worker.start_link(arg)
-      # {Jswatch.Worker, arg}
+      JswatchWeb.Endpoint,
+
+      # CAMBIOS: commit -> "Cambios en la lógica de los GenServers para que sean iniciados application.ex"
+      # Inicia los GenServers de la lógica del reloj como workers supervisados.
+      # Se inician una sola vez con la aplicación.
+      {ClockManager, name: ClockManager},
+      {IndigloManager, name: IndigloManager},
+      {StopwatchManager, name: StopwatchManager}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

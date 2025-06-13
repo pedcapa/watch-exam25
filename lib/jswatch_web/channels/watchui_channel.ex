@@ -1,14 +1,39 @@
 defmodule JswatchWeb.WatchUIChannel do
   use Phoenix.Channel
+  alias JswatchWeb.{ClockManager, IndigloManager, StopwatchManager}
 
   def join("watch:ui", _message, socket) do
-    GenServer.start_link(JswatchWeb.ClockManager, self())
-    GenServer.start_link(JswatchWeb.IndigloManager, self())
+    # Registra este canal como la UI activa para los managers
+    GenServer.cast(ClockManager, {:register_ui, self()})
+    GenServer.cast(IndigloManager, {:register_ui, self()})
+    GenServer.cast(StopwatchManager, {:register_ui, self()})
+
+    # Pide al ClockManager que envíe su estado actual para pintar la UI inicial
+    GenServer.cast(ClockManager, :resend_display)
+
     {:ok, socket}
   end
 
+  # CAMBIO: commit -> "Manejador de eventos de botones."
+  # Ignoramos los eventos "-released" por ahora, ya que la lógica se basa en el "-pressed".
   def handle_in(event, _payload, socket) do
-    :gproc.send({:p, :l, :ui_event}, String.to_atom(event))
+    case event do
+      "bottom-right-pressed" ->
+        GenServer.cast(ClockManager, {:button_press, :bottom_right})
+        # GenServer.cast(StopwatchManager, {:button_press, :bottom_right})
+
+      "bottom-left-pressed" ->
+        GenServer.cast(ClockManager, {:button_press, :bottom_left})
+        # GenServer.cast(StopwatchManager, {:button_press, :bottom_left})
+
+      "top-right-pressed" ->
+        GenServer.cast(IndigloManager, {:button_press, :top_right})
+
+      _ ->
+        # Ignora otros eventos como "top-right-released", etc.
+        :ok
+    end
+
     {:noreply, socket}
   end
 
